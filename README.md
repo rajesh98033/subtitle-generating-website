@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+AI Video Subtitle Generator (.srt)
+## Overview
+This project is a full-stack web application that automatically generates subtitles from uploaded videos.
+Users can upload a video file, and the system:
 
-## Getting Started
+- extracts audio using FFmpeg
+- transcribes speech using OpenAI Whisper (local)
+- generates timestamped subtitles in .srt format
+- allows users to preview and download subtitles
 
-First, run the development server:
+## Features
+- Upload video files
+- Automatic audio extraction using FFmpeg
+- Speech-to-text transcription using Whisper
+- Subtitle generation in standard .srt format
+- downloadable subtitle file
+- Video Preview before processing
+- Fully local processing
+- No API cost
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Tech Stack
+Frontend
+  - Next.js
+  - React
+  - Tailwind CSS
+Backend
+  - Next.js API Routes
+  - Nodes.js
+  - File system handling
+AI & Processing
+  - FFmpeg (audio extraction)
+  - OpenAI Whisper (local transcripiton via Python)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Pipeline Architecture
+Video Upload
+     ↓
+Save to Server
+     ↓
+FFmpeg (Extract Audio → WAV)
+     ↓
+Whisper (Speech-to-Text)
+     ↓
+Generate Segmented Transcript
+     ↓
+Convert to SRT Format
+     ↓
+Return + Download Subtitles
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Example Output
+1
+00:00:01,000 --> 00:00:03,500
+Hello everyone, welcome back.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2
+00:00:03,500 --> 00:00:06,000
+Today we are building an AI project.
 
-## Learn More
+## Setup Instructions
+1. Clone the repo
+2. Install dependencies
+3. Install FFmpeg
+4. Install Python & Whisper
+5. Run the app
+   - npm run dev
+   - Open: http://localhost:3000
 
-To learn more about Next.js, take a look at the following resources:
+## Limitations
+- Initially designed for Nepali speech transcription; current MVP focuses on English due to model limitations
+- Processing is CPU-bound, so slower for long videos
+- Accuracy depends on audio quality
+- Not optimized for large-scale or production use
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Future Improvements
+- Support multilingual transcription (Nepali to English)
+- Improve accuracy using larger and better models
+- Deploy with cloud-based inference
+- Subtitle embedding directly into video
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Key Learnings
+- Built an end-to-end AI pipeline (not just UI)
+- Integrated Node.js backend with Python ML script
+- Worked with media processing using FFmpeg
+- Implemented real-world subtitle formatting (.srt)
+- Understood limitations of speech models in low-resource languages
 
-## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
