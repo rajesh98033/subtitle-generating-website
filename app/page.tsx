@@ -4,10 +4,47 @@ import { useState } from "react";
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [message, setMessage] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
+    setMessage("");
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      setMessage("Please select a video first.");
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setMessage("Uploading...");
+
+      const formData = new FormData();
+      formData.append("video", selectedFile);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || "Upload failed.");
+        return;
+      }
+
+      setMessage(data.message || "Upload successful.");
+    } catch (error) {
+      console.error(error);
+      setMessage("Something went wrong during upload.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -32,11 +69,16 @@ export default function Home() {
         )}
 
         <button
-          disabled
-          className="mt-6 w-full rounded-lg bg-white/20 px-4 py-2 font-semibold text-white cursor-not-allowed"
+          onClick={handleUpload}
+          disabled={isUploading}
+          className="mt-6 w-full rounded-lg bg-white px-4 py-2 font-semibold text-black disabled:opacity-50"
         >
-          Upload Coming Next
+          {isUploading ? "Uploading..." : "Upload Video"}
         </button>
+
+        {message && (
+          <p className="mt-4 text-sm text-white/80">{message}</p>
+        )}
       </div>
     </main>
   );
