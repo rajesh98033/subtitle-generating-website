@@ -34,8 +34,7 @@ AI & Processing
   - OpenAI Whisper (local transcripiton via Python)
 
 ## Pipeline Architecture
-<img width="1155" height="762" alt="image" src="https://github.com/user-attachments/assets/80fadf64-5725-47fe-bde3-2b6b2fb71997" />
-
+<img width="507" height="1424" alt="mermaid-diagram" src="https://github.com/user-attachments/assets/c637c936-5a06-4950-b072-60e497d5d118" />
      
 Return + Download Subtitles
 
