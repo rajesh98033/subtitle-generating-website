@@ -23,10 +23,12 @@ Frontend
   - Next.js
   - React
   - Tailwind CSS
+
 Backend
   - Next.js API Routes
   - Nodes.js
   - File system handling
+  
 AI & Processing
   - FFmpeg (audio extraction)
   - OpenAI Whisper (local transcripiton via Python)
