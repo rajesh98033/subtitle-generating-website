@@ -34,29 +34,8 @@ AI & Processing
   - OpenAI Whisper (local transcripiton via Python)
 
 ## Pipeline Architecture
-Video Upload
+<img width="1155" height="762" alt="image" src="https://github.com/user-attachments/assets/80fadf64-5725-47fe-bde3-2b6b2fb71997" />
 
-     ↓
-
-Save to Server
-
-     ↓
-
-FFmpeg (Extract Audio → WAV)
-
-     ↓
-
-Whisper (Speech-to-Text)
-
-     ↓
-
-Generate Segmented Transcript
-
-     ↓
-
-Convert to SRT Format
-
-     ↓
      
 Return + Download Subtitles
 
