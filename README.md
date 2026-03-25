@@ -28,24 +28,36 @@ Backend
   - Next.js API Routes
   - Nodes.js
   - File system handling
-  
+
 AI & Processing
   - FFmpeg (audio extraction)
   - OpenAI Whisper (local transcripiton via Python)
 
 ## Pipeline Architecture
 Video Upload
+
      ↓
+
 Save to Server
+
      ↓
+
 FFmpeg (Extract Audio → WAV)
+
      ↓
+
 Whisper (Speech-to-Text)
+
      ↓
+
 Generate Segmented Transcript
+
      ↓
+
 Convert to SRT Format
+
      ↓
+     
 Return + Download Subtitles
 
 ## Example Output
