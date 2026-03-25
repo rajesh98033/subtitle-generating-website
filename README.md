@@ -35,8 +35,6 @@ AI & Processing
 
 ## Pipeline Architecture
 <img width="507" height="1424" alt="mermaid-diagram" src="https://github.com/user-attachments/assets/c637c936-5a06-4950-b072-60e497d5d118" />
-     
-Return + Download Subtitles
 
 ## Example Output
 1
