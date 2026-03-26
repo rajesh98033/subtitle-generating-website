@@ -100,7 +100,7 @@ export default function Home() {
       <div className="mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
         <h1 className="mb-2 text-2xl font-bold">Subtitle Generator</h1>
         <p className="mb-6 text-sm text-white/70">
-          Upload an English video to generate subtitle text and an SRT file.
+          Upload a Nepali video to generate subtitle text and an SRT file.
         </p>
 
         <input
