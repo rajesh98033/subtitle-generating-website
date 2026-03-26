@@ -31,37 +31,41 @@ Backend
 
 AI & Processing
   - FFmpeg (audio extraction)
-  - OpenAI Whisper (local transcripiton via Python)
+  - OpenAI Whisper (local transcripiton via Python) (**Before)
+  - Groq API with Whisper large-v3 (cloud transcription via python)
 
 ## Pipeline Architecture
 <img width="507" height="1424" alt="mermaid-diagram" src="https://github.com/user-attachments/assets/c637c936-5a06-4950-b072-60e497d5d118" />
 
 ## Example Output
+```
 1
-00:00:01,000 --> 00:00:03,500
-Hello everyone, welcome back.
-
-2
-00:00:03,500 --> 00:00:06,000
-Today we are building an AI project.
+00:00:00,000 --> 00:00:06,240
+मा खाना खान्छु, अनि तिस पछी मा साथिको गोर जान्छु
+```
 
 ## Setup Instructions
 1. Clone the repo
 2. Install dependencies
 3. Install FFmpeg
-4. Install Python & Whisper
+4. Install Python & Groq package
+   - pip install groq (I am using free tier)
+5. Create a `.env.local` file in the project root:
+```
+   GROQ_API_KEY=your_groq_api_key_here
+```
+   Get a free API key at [console.groq.com](https://console.groq.com)
 5. Run the app
    - npm run dev
    - Open: http://localhost:3000
 
 ## Limitations
-- Initially designed for Nepali speech transcription; current MVP focuses on English due to model limitations
-- Processing is CPU-bound, so slower for long videos
+- Groq free tier allows ~2 hours of audio per day
 - Accuracy depends on audio quality
 - Not optimized for large-scale or production use
 
 ## Future Improvements
-- Support multilingual transcription (Nepali to English)
+- Translation support (Nepali to English)
 - Improve accuracy using larger and better models
 - Deploy with cloud-based inference
 - Subtitle embedding directly into video

@@ -66,7 +66,13 @@ export async function POST(req: NextRequest) {
     await execAsync(ffmpegCommand);
 
     const pythonCommand = `python python/transcribe.py "${audioPath}"`;
-    const { stdout, stderr } = await execAsync(pythonCommand);
+    //const pythonCommand = `set GROQ_API_KEY=${process.env.GROQ_API_KEY} && python python/transcribe.py "${audioPath}"`;
+    const { stdout, stderr } = await execAsync(pythonCommand, {
+    env: {
+      ...process.env,
+      GROQ_API_KEY: process.env.GROQ_API_KEY?.trim(),
+    }
+    });
 
     if (stderr) {
       console.error("Python stderr:", stderr);

@@ -1,29 +1,36 @@
-import sys
+import sys, os
 import json
-import whisper
+from groq import Groq
 
-def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "No audio file path provided."}))
-        sys.exit(1)
+# Fix Windows encoding for Devanagari script
+# But if you're on Linux/Mac, you can probably skip this part
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
 
-    audio_path = sys.argv[1]
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-    model = whisper.load_model("base")
+audio_path = sys.argv[1]
 
-    result = model.transcribe(
-        audio_path,
-        language="en",
-        task="transcribe",
-        fp16=False
+with open(audio_path, "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=(audio_path, audio_file.read()),
+        model="whisper-large-v3",
+        language="ne",          # force Nepali language
+        response_format="verbose_json",  # needed to get segments with timestamps
+        timestamp_granularities=["segment"]
     )
 
-    output = {
-        "text": result.get("text", ""),
-        "segments": result.get("segments", [])
-    }
+result = {
+    "text": transcription.text,
+    "segments": [
+        {
+            "start": seg["start"],    # use dict access
+            "end": seg["end"],        # use dict access
+            "text": seg["text"]       # use dict access
+        }
+        for seg in transcription.segments
+    ]
+}
 
-    print(json.dumps(output, ensure_ascii=False))
-
-if __name__ == "__main__":
-    main()
+print(json.dumps(result, ensure_ascii=False))  # ensure_ascii=False is important for Devanagari script!
