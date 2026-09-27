@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import BurnPanel from "./components/BurnPanel";
 import SegmentEditor from "./components/SegmentEditor";
-import { renderSubtitles, toVTT, type Segment, type SubtitleFormat } from "@/lib/subtitles";
+import { renderSubtitles, toSRT, toVTT, type Segment, type SubtitleFormat } from "@/lib/subtitles";
+import { postJSON } from "@/lib/upload";
 import { TYPING_GUIDE } from "@/lib/nepali";
 
 type Status = "idle" | "uploading" | "processing" | "done" | "error";
@@ -45,29 +47,6 @@ function downloadText(content: string, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Uses XHR instead of fetch so we can report upload progress. */
-function uploadWithProgress(formData: FormData, onProgress: (pct: number) => void, onUploaded: () => void) {
-  return new Promise<{ ok: boolean; data: Record<string, unknown> }>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/upload");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.upload.onload = onUploaded;
-    xhr.onload = () => {
-      let data: Record<string, unknown> = {};
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch {
-        data = { error: `Server returned an unexpected response (${xhr.status}).` };
-      }
-      resolve({ ok: xhr.status >= 200 && xhr.status < 300, data });
-    };
-    xhr.onerror = () => reject(new Error("Network error. Is the server running?"));
-    xhr.send(formData);
-  });
-}
-
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [videoURL, setVideoURL] = useState("");
@@ -87,6 +66,7 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0);
   const [copied, setCopied] = useState(false);
   const [nepaliTyping, setNepaliTyping] = useState(true);
+  const [shiftBy, setShiftBy] = useState("0.5");
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +104,7 @@ export default function Home() {
   );
 
   const output = useMemo(() => renderSubtitles(segments, format), [segments, format]);
+  const srtForBurn = useMemo(() => toSRT(segments.filter((s) => s.text.trim() && s.end > s.start)), [segments]);
 
   const selectFile = (next: File | null) => {
     if (isBusy) return;
@@ -156,13 +137,16 @@ export default function Home() {
     formData.append("maxChars", String(maxChars));
 
     try {
-      const { ok, data } = await uploadWithProgress(formData, setProgress, () => setStatus("processing"));
-      if (!ok) {
-        setError(String(data.error || "Processing failed."));
+      const response = await postJSON<Result>("/api/upload", formData, {
+        onProgress: setProgress,
+        onUploaded: () => setStatus("processing"),
+      });
+      if (!response.ok) {
+        setError(response.error);
         setStatus("error");
         return;
       }
-      const res = data as unknown as Result;
+      const res = response.data;
       setResult(res);
       setSegments(res.segments);
       // Devanagari subtitles are easiest to fix with romanized Nepali typing.
@@ -178,6 +162,41 @@ export default function Home() {
     setSegments((prev) => prev.map((s, i) => (i === index ? { ...s, text } : s)));
 
   const deleteSegment = (index: number) => setSegments((prev) => prev.filter((_, i) => i !== index));
+
+  const roundMs = (seconds: number) => Math.max(0, Math.round(seconds * 1000) / 1000);
+
+  // Keep subtitles in time order, so moving a start time can reorder the list.
+  const updateTiming = (index: number, patch: Partial<Pick<Segment, "start" | "end">>) =>
+    setSegments((prev) =>
+      prev
+        .map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                ...(patch.start !== undefined && { start: roundMs(patch.start) }),
+                ...(patch.end !== undefined && { end: roundMs(patch.end) }),
+              }
+            : s
+        )
+        .sort((a, b) => a.start - b.start)
+    );
+
+  // New subtitle fills the gap after `index` (up to 2s), for lines Whisper missed.
+  const insertAfter = (index: number) =>
+    setSegments((prev) => {
+      const start = prev[index].end;
+      const next = prev[index + 1];
+      const end = next ? Math.max(start + 0.5, Math.min(next.start, start + 2)) : start + 2;
+      return [...prev.slice(0, index + 1), { start, end: roundMs(end), text: "" }, ...prev.slice(index + 1)];
+    });
+
+  const shiftAll = () => {
+    const delta = Number(shiftBy);
+    if (!Number.isFinite(delta) || delta === 0) return;
+    setSegments((prev) => prev.map((s) => ({ ...s, start: roundMs(s.start + delta), end: roundMs(s.end + delta) })));
+  };
+
+  const getCurrentTime = () => roundMs(mediaRef.current?.currentTime ?? 0);
 
   const seekTo = (seconds: number) => {
     const media = mediaRef.current;
@@ -369,7 +388,8 @@ export default function Home() {
               )}
               {segments.length > 0 && (
                 <p className="mt-2 text-xs text-white/50">
-                  {segments.length} subtitles · edits update the preview instantly. Click a timestamp to jump there.
+                  {segments.length} subtitles · edits update the preview instantly. Click ▶ to play from a subtitle,
+                  or ⏱ to set a time from the video.
                 </p>
               )}
             </div>
@@ -410,10 +430,34 @@ export default function Home() {
                     </p>
                   </details>
                 )}
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-white/60">
+                  <label htmlFor="shift-by">Shift all timings by</label>
+                  <input
+                    id="shift-by"
+                    type="number"
+                    step="0.1"
+                    value={shiftBy}
+                    onChange={(e) => setShiftBy(e.target.value)}
+                    className="w-20 rounded border border-white/10 bg-black/40 px-1.5 py-0.5 font-mono outline-none focus:border-sky-400/60"
+                  />
+                  <span>seconds</span>
+                  <button
+                    type="button"
+                    onClick={shiftAll}
+                    className="rounded border border-white/15 px-2 py-0.5 hover:bg-white/10"
+                    title="Positive = subtitles appear later, negative = earlier"
+                  >
+                    Apply
+                  </button>
+                  <span className="text-white/40">(negative = earlier)</span>
+                </div>
                 <SegmentEditor
                   segments={segments}
                   activeIndex={activeIndex}
                   nepaliTyping={nepaliTyping}
+                  getCurrentTime={getCurrentTime}
+                  onTimeChange={updateTiming}
+                  onInsertAfter={insertAfter}
                   onChange={updateSegment}
                   onDelete={deleteSegment}
                   onSeek={seekTo}
@@ -456,6 +500,10 @@ export default function Home() {
               {output}
             </pre>
           </section>
+        )}
+
+        {segments.length > 0 && result && file && !isAudioOnly && (
+          <BurnPanel key={videoURL} file={file} srt={srtForBurn} baseName={result.baseName} />
         )}
       </div>
     </main>

@@ -23,6 +23,19 @@ export function formatTimestamp(seconds: number, format: "srt" | "vtt" = "srt"):
   return `${pad(hrs, 2)}:${pad(mins, 2)}:${pad(secs, 2)}${sep}${pad(millis, 3)}`;
 }
 
+/**
+ * Parses what a user typed into a time field back into seconds.
+ * Accepts "HH:MM:SS.mmm", "MM:SS.mmm" or "SS.mmm" (comma or dot for ms).
+ * Returns null if it isn't a valid time.
+ */
+export function parseTimestamp(value: string): number | null {
+  const match = value.trim().replace(",", ".").match(/^(?:(?:(\d+):)?(\d{1,2}):)?(\d+(?:\.\d{0,3})?)$/);
+  if (!match) return null;
+  const [, hrs = "0", mins = "0", secs] = match;
+  if (value.includes(":") && Number(secs) >= 60) return null;
+  return Number(hrs) * 3600 + Number(mins) * 60 + Number(secs);
+}
+
 export function toSRT(segments: Segment[]): string {
   return segments
     .map(
