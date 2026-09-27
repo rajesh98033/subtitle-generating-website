@@ -15,7 +15,10 @@ Users can upload a video file, and the system:
 - **Translate to English** mode (Nepali speech → English subtitles)
 - Long Whisper segments are split into readable subtitle lines (configurable length)
 - Live preview: generated captions play on top of your video
-- **Edit subtitles** in the browser; click a timestamp to jump the video there
+- **Edit subtitles** in the browser; click ▶ to play from any subtitle
+- **Type Nepali with an English keyboard**: `khaanchhu` + space → `खान्छु`
+- **Fix timings**: type a start/end time, nudge with ↑/↓, set it from the video with ⏱, add missing lines, or shift every subtitle earlier/later at once
+- **Burn subtitles into the video**: download an MP4 with the subtitles drawn on it (3 styles, 3 sizes), ready for Facebook, TikTok or WhatsApp
 - Export as **SRT**, **VTT** or plain **TXT**, or copy to clipboard
 - Uploaded files are processed in a temp folder and deleted right after
 
@@ -48,7 +51,7 @@ AI & Processing
 ## Setup Instructions
 1. Clone the repo
 2. Install dependencies
-3. Install FFmpeg
+3. Install FFmpeg (a full build with libass, needed for burning subtitles into video; on Windows the gyan.dev "full" build works)
 4. Install Python & the Groq package
    - `pip install -r python/requirements.txt` (free tier works)
 5. Copy `.env.example` to `.env.local` and fill in your key:
@@ -71,7 +74,6 @@ AI & Processing
 ## Future Improvements
 - Improve accuracy using larger and better models
 - Deploy with cloud-based inference
-- Subtitle embedding directly into video
 
 ## Key Learnings
 - Built an end-to-end AI pipeline (not just UI)
@@ -80,5 +82,5 @@ AI & Processing
 - Implemented real-world subtitle formatting (.srt)
 - Understood limitations of speech models in low-resource languages
 
-
-
+## Credits
+- Burned-in subtitles use [Noto Sans Devanagari](https://github.com/notofonts/devanagari), bundled in `assets/fonts` under the SIL Open Font License (see `assets/fonts/OFL.txt`).
