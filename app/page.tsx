@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import SegmentEditor from "./components/SegmentEditor";
 import { renderSubtitles, toVTT, type Segment, type SubtitleFormat } from "@/lib/subtitles";
+import { TYPING_GUIDE } from "@/lib/nepali";
 
 type Status = "idle" | "uploading" | "processing" | "done" | "error";
 
@@ -85,6 +86,7 @@ export default function Home() {
   const [format, setFormat] = useState<SubtitleFormat>("srt");
   const [currentTime, setCurrentTime] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [nepaliTyping, setNepaliTyping] = useState(true);
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -163,6 +165,8 @@ export default function Home() {
       const res = data as unknown as Result;
       setResult(res);
       setSegments(res.segments);
+      // Devanagari subtitles are easiest to fix with romanized Nepali typing.
+      setNepaliTyping(task === "transcribe" && (res.language === "ne" || res.language === "hi"));
       setStatus("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -372,10 +376,44 @@ export default function Home() {
 
             {segments.length > 0 && (
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <h2 className="mb-3 font-semibold">Edit subtitles</h2>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-semibold">Edit subtitles</h2>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={nepaliTyping}
+                      onChange={(e) => setNepaliTyping(e.target.checked)}
+                      className="h-4 w-4 accent-sky-400"
+                    />
+                    Type in Nepali (नेपाली)
+                  </label>
+                </div>
+                {nepaliTyping && (
+                  <details className="mb-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70">
+                    <summary className="cursor-pointer select-none">
+                      Type Nepali with English letters. The word converts when you press space.{" "}
+                      <span className="text-sky-300">How to type</span>
+                    </summary>
+                    <table className="mt-2 w-full">
+                      <tbody>
+                        {TYPING_GUIDE.map(([roman, nepali]) => (
+                          <tr key={roman} className="border-t border-white/5">
+                            <td className="py-1 pr-3 font-mono whitespace-pre">{roman}</td>
+                            <td className="py-1 text-sm text-white whitespace-pre">{nepali}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="mt-2 text-white/50">
+                      Capital T, D, N, Sh are different letters (ट ड ण ष), so type in lowercase otherwise. A Nepali
+                      keyboard on your device also works.
+                    </p>
+                  </details>
+                )}
                 <SegmentEditor
                   segments={segments}
                   activeIndex={activeIndex}
+                  nepaliTyping={nepaliTyping}
                   onChange={updateSegment}
                   onDelete={deleteSegment}
                   onSeek={seekTo}

@@ -18,6 +18,14 @@ const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === "win32" ? "py
 const SCRIPT_PATH = path.join(process.cwd(), "python", "transcribe.py");
 
 const LANGUAGE_PATTERN = /^(auto|[a-z]{2,3})$/;
+// Whisper reports the detected language by name, e.g. "nepali".
+const LANGUAGE_CODES: Record<string, string> = { nepali: "ne", hindi: "hi", english: "en" };
+
+function languageCode(requested: string, detected?: string) {
+  if (requested !== "auto") return requested;
+  const name = (detected ?? "").toLowerCase();
+  return LANGUAGE_CODES[name] ?? (/^[a-z]{2,3}$/.test(name) ? name : "und");
+}
 
 class UserError extends Error {
   constructor(message: string, public status = 400) {
@@ -129,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({
       baseName,
-      language: result.language ?? language,
+      language: languageCode(language, result.language),
       transcript: result.text ?? "",
       segments,
     });
