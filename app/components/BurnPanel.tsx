@@ -20,8 +20,8 @@ const SIZES = [
 
 const STYLES = [
   { value: "box", label: "Dark box (like the preview)", sample: "bg-black/75 px-1.5 text-white" },
-  { value: "outline", label: "White with outline", sample: "text-white [text-shadow:0_0_2px_#000,0_0_2px_#000,0_0_2px_#000]" },
-  { value: "yellow", label: "Yellow with outline", sample: "text-yellow-300 [text-shadow:0_0_2px_#000,0_0_2px_#000,0_0_2px_#000]" },
+  { value: "outline", label: "White text", sample: "text-white" },
+  { value: "yellow", label: "Yellow text", sample: "text-yellow-300" },
 ];
 
 export default function BurnPanel({ file, segments, baseName }: Props) {

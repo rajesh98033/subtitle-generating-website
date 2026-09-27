@@ -21,7 +21,7 @@ const SIZE_RATIO: Record<BurnSize, number> = { small: 0.045, medium: 0.055, larg
 // ASS colours are &HAABBGGRR, where AA=00 is opaque and FF is transparent.
 const WHITE = "&H00FFFFFF";
 const YELLOW = "&H0000FFFF";
-const BLACK = "&H00000000";
+const INVISIBLE = "&HFF000000";
 const BOX = "&H40000000"; // black at ~75% opacity, like the preview's ::cue background
 
 function timestamp(seconds: number) {
@@ -55,18 +55,21 @@ export function toASS(
   const marginV = Math.round(height * (isPortrait ? 0.12 : 0.07));
   const marginH = Math.round(width * 0.06);
 
+  // No outline or shadow on the letters in any style: plain, clean text.
   const look =
     style === "box"
-      ? // BorderStyle 4 draws one box around the whole subtitle (even when it
-        // wraps), matching the preview; "Outline" is the box padding here.
-        { primary: WHITE, outlineColour: BOX, back: BOX, borderStyle: 4, outline: Math.round(fontSize * 0.25), shadow: 0 }
+      ? // BorderStyle 4 draws one box (BackColour) around the whole subtitle,
+        // even when it wraps, matching the preview. "Outline" is the box
+        // padding here; OutlineColour must be invisible, or libass also draws
+        // a dark outline around every letter.
+        { primary: WHITE, outlineColour: INVISIBLE, back: BOX, borderStyle: 4, outline: Math.round(fontSize * 0.25), shadow: 0 }
       : {
           primary: style === "yellow" ? YELLOW : WHITE,
-          outlineColour: BLACK,
-          back: "&H80000000",
+          outlineColour: INVISIBLE,
+          back: INVISIBLE,
           borderStyle: 1,
-          outline: Math.max(1, Math.round(fontSize * 0.08)),
-          shadow: Math.max(1, Math.round(fontSize * 0.04)),
+          outline: 0,
+          shadow: 0,
         };
 
   const header = [
