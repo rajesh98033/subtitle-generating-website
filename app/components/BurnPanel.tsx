@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { postForBlob } from "@/lib/upload";
+import type { Segment } from "@/lib/subtitles";
 
 type Props = {
   file: File;
-  srt: string;
+  segments: Segment[];
   baseName: string;
 };
 
@@ -18,22 +19,24 @@ const SIZES = [
 ];
 
 const STYLES = [
+  { value: "box", label: "Dark box (like the preview)", sample: "bg-black/75 px-1.5 text-white" },
   { value: "outline", label: "White with outline", sample: "text-white [text-shadow:0_0_2px_#000,0_0_2px_#000,0_0_2px_#000]" },
-  { value: "box", label: "White on dark box", sample: "bg-black/60 px-1.5 text-white" },
   { value: "yellow", label: "Yellow with outline", sample: "text-yellow-300 [text-shadow:0_0_2px_#000,0_0_2px_#000,0_0_2px_#000]" },
 ];
 
-export default function BurnPanel({ file, srt, baseName }: Props) {
+export default function BurnPanel({ file, segments, baseName }: Props) {
   const [size, setSize] = useState("medium");
-  const [style, setStyle] = useState("outline");
+  const [style, setStyle] = useState("box");
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
-  const [video, setVideo] = useState<{ url: string; srt: string; bytes: number } | null>(null);
+  const [video, setVideo] = useState<{ url: string; subtitles: string; bytes: number } | null>(null);
 
+  // Snapshot of the subtitles, to tell whether the rendered video is outdated.
+  const subtitles = useMemo(() => JSON.stringify(segments), [segments]);
   const isBusy = status === "uploading" || status === "rendering";
-  const isStale = video !== null && video.srt !== srt;
+  const isStale = video !== null && video.subtitles !== subtitles;
 
   useEffect(() => {
     return () => {
@@ -56,7 +59,7 @@ export default function BurnPanel({ file, srt, baseName }: Props) {
 
     const formData = new FormData();
     formData.append("video", file);
-    formData.append("srt", srt);
+    formData.append("segments", subtitles);
     formData.append("size", size);
     formData.append("style", style);
 
@@ -70,7 +73,7 @@ export default function BurnPanel({ file, srt, baseName }: Props) {
         setStatus("error");
         return;
       }
-      setVideo({ url: URL.createObjectURL(res.data), srt, bytes: res.data.size });
+      setVideo({ url: URL.createObjectURL(res.data), subtitles, bytes: res.data.size });
       setStatus("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");

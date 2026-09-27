@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import BurnPanel from "./components/BurnPanel";
 import SegmentEditor from "./components/SegmentEditor";
-import { renderSubtitles, toSRT, toVTT, type Segment, type SubtitleFormat } from "@/lib/subtitles";
+import { renderSubtitles, toVTT, type Segment, type SubtitleFormat } from "@/lib/subtitles";
 import { postJSON } from "@/lib/upload";
 import { TYPING_GUIDE } from "@/lib/nepali";
 
@@ -104,7 +104,6 @@ export default function Home() {
   );
 
   const output = useMemo(() => renderSubtitles(segments, format), [segments, format]);
-  const srtForBurn = useMemo(() => toSRT(segments.filter((s) => s.text.trim() && s.end > s.start)), [segments]);
 
   const selectFile = (next: File | null) => {
     if (isBusy) return;
@@ -503,7 +502,7 @@ export default function Home() {
         )}
 
         {segments.length > 0 && result && file && !isAudioOnly && (
-          <BurnPanel key={videoURL} file={file} srt={srtForBurn} baseName={result.baseName} />
+          <BurnPanel key={videoURL} file={file} segments={segments} baseName={result.baseName} />
         )}
       </div>
     </main>

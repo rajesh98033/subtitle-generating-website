@@ -6,6 +6,8 @@ import path from "path";
 import { Readable } from "stream";
 import { promisify } from "util";
 import type { NextRequest } from "next/server";
+import { BURN_SIZES, BURN_STYLES, toASS, type BurnSize, type BurnStyle } from "@/lib/ass";
+import type { Segment } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
 export const maxDuration = 800;
@@ -14,21 +16,43 @@ const execFileAsync = promisify(execFile);
 
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB) || 500;
 const FONTS_DIR = path.join(process.cwd(), "assets", "fonts");
-// Bundled so Nepali renders the same on every machine, whatever fonts are installed.
-const FONT_NAME = "Noto Sans Devanagari";
 
-// Sizes are in libass units: relative to a 288px-tall canvas, so they scale
-// with the video's resolution.
-const SIZES: Record<string, number> = { small: 14, medium: 18, large: 24 };
+/**
+ * Reads the video's on-screen size. Phones often store portrait video as
+ * landscape plus a "rotate 90°" flag, so swap width/height in that case;
+ * FFmpeg applies the rotation when it renders.
+ */
+async function probeDisplaySize(inputName: string, cwd: string) {
+  let info = "";
+  try {
+    await execFileAsync("ffmpeg", ["-hide_banner", "-i", inputName], { cwd });
+  } catch (error) {
+    // "ffmpeg -i" with no output always exits with an error; the info is in stderr.
+    const err = error as NodeJS.ErrnoException & { stderr?: string };
+    if (err.code === "ENOENT") throw err;
+    info = err.stderr ?? "";
+  }
+  const size = info.match(/Video:.*?\b(\d{2,5})x(\d{2,5})\b/);
+  if (!size) return null;
+  let width = Number(size[1]);
+  let height = Number(size[2]);
+  const rotation = info.match(/rotation of (-?\d+(?:\.\d+)?) degrees/) ?? info.match(/rotate\s*:\s*(-?\d+)/);
+  if (rotation && Math.abs(Number(rotation[1])) % 180 === 90) [width, height] = [height, width];
+  return { width, height };
+}
 
-const STYLES: Record<string, string> = {
-  // White text with a black outline: readable on anything, least intrusive.
-  outline: "BorderStyle=1,Outline=1.6,Shadow=0.6,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000",
-  // White text on a semi-transparent black box, the social media look.
-  box: "BorderStyle=3,Outline=6,Shadow=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BackColour=&H80000000",
-  // Yellow text with an outline, the classic film-subtitle look.
-  yellow: "BorderStyle=1,Outline=1.6,Shadow=0.6,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000",
-};
+function parseSegments(value: FormDataEntryValue | null): Segment[] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .map((s) => ({ start: Number(s?.start), end: Number(s?.end), text: String(s?.text ?? "") }))
+      .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start && s.text.trim());
+  } catch {
+    return null;
+  }
+}
 
 function errorResponse(message: string, status: number) {
   return Response.json({ error: message }, { status });
@@ -41,9 +65,11 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("video");
-    const srt = formData.get("srt");
-    const size = SIZES[String(formData.get("size"))] ?? SIZES.medium;
-    const style = STYLES[String(formData.get("style"))] ?? STYLES.outline;
+    const segments = parseSegments(formData.get("segments"));
+    const sizeValue = String(formData.get("size"));
+    const styleValue = String(formData.get("style"));
+    const size: BurnSize = BURN_SIZES.includes(sizeValue as BurnSize) ? (sizeValue as BurnSize) : "medium";
+    const style: BurnStyle = BURN_STYLES.includes(styleValue as BurnStyle) ? (styleValue as BurnStyle) : "box";
 
     if (!(file instanceof File) || file.size === 0) {
       return errorResponse("No video uploaded.", 400);
@@ -54,25 +80,37 @@ export async function POST(req: NextRequest) {
     if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
       return errorResponse(`File is too large. The limit is ${MAX_UPLOAD_MB} MB.`, 413);
     }
-    if (typeof srt !== "string" || !srt.trim()) {
+    if (!segments || segments.length === 0) {
       return errorResponse("There are no subtitles to burn in.", 400);
     }
 
     const ext = path.extname(file.name).replace(/[^.\w]/g, "").slice(0, 10) || ".mp4";
-    await fs.writeFile(path.join(workDir, `input${ext}`), Buffer.from(await file.arrayBuffer()));
-    await fs.writeFile(path.join(workDir, "subs.srt"), srt, "utf-8");
+    const inputName = `input${ext}`;
+    await fs.writeFile(path.join(workDir, inputName), Buffer.from(await file.arrayBuffer()));
     await fs.cp(FONTS_DIR, path.join(workDir, "fonts"), { recursive: true });
+
+    let display;
+    try {
+      display = await probeDisplaySize(inputName, workDir);
+    } catch {
+      return errorResponse("FFmpeg is not installed or not on your PATH.", 500);
+    }
+    if (!display) {
+      return errorResponse("Could not read this video. Is it a valid video file?", 400);
+    }
+
+    await fs.writeFile(path.join(workDir, "subs.ass"), toASS(segments, { ...display, style, size }), "utf-8");
 
     // Running inside workDir lets the filter use plain relative paths, which
     // avoids FFmpeg's awkward escaping of Windows paths like "D:\My Work".
-    const filter = `subtitles=subs.srt:charenc=UTF-8:fontsdir=fonts:force_style='FontName=${FONT_NAME},FontSize=${size},MarginV=18,${style}'`;
+    const filter = "subtitles=subs.ass:fontsdir=fonts";
 
     try {
       await execFileAsync(
         "ffmpeg",
         [
           "-y",
-          "-i", `input${ext}`,
+          "-i", inputName,
           "-vf", filter,
           "-c:v", "libx264",
           "-preset", "veryfast",
