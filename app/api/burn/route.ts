@@ -103,7 +103,9 @@ export async function POST(req: NextRequest) {
 
     // Running inside workDir lets the filter use plain relative paths, which
     // avoids FFmpeg's awkward escaping of Windows paths like "D:\My Work".
-    const filter = "subtitles=subs.ass:fontsdir=fonts";
+    // shaping=complex is required for Devanagari: the default "simple" layout
+    // draws the ि vowel sign after its consonant ("अनतिेस" instead of "अनि तेस").
+    const filter = "ass=subs.ass:fontsdir=fonts:shaping=complex";
 
     try {
       await execFileAsync(
@@ -128,7 +130,7 @@ export async function POST(req: NextRequest) {
       if (err.code === "ENOENT") {
         return errorResponse("FFmpeg is not installed or not on your PATH.", 500);
       }
-      if (/No such filter: 'subtitles'|Filter not found/i.test(err.stderr ?? "")) {
+      if (/No such filter: 'ass'|Filter not found/i.test(err.stderr ?? "")) {
         return errorResponse(
           "Your FFmpeg build can't draw subtitles (it was built without libass). Install a full build, e.g. from gyan.dev on Windows.",
           500
