@@ -59,15 +59,29 @@ AI & Processing
    GROQ_API_KEY=your_groq_api_key_here
    # optional
    PYTHON_BIN=python3      # defaults to "python" on Windows, "python3" elsewhere
-   MAX_UPLOAD_MB=500
+   DAILY_VIDEO_LIMIT=10    # see .env.example for all usage limits
 ```
    Get a free API key at [console.groq.com](https://console.groq.com)
 6. Run the app
    - npm run dev
    - Open: http://localhost:3000
 
+## Usage limits
+To keep the site usable for everyone on Groq's free tier, each visitor gets:
+- videos up to **1 minute** and **150 MB**
+- **10** subtitle generations and **10** video renders per day (reset at midnight Nepal time)
+
+A shared daily cap (450 minutes of audio) stops the site just before Groq's own free-tier limit,
+so users see a friendly message instead of an error. Failed attempts don't count.
+
+Visitors are identified by a cookie, with a generous per-IP backstop (mobile networks share IPs).
+Counters are kept in server memory, so no database or storage is needed; they reset if the server restarts.
+Videos are never stored: they're deleted as soon as they're processed.
+
+Every limit can be changed with an environment variable, see `.env.example`.
+
 ## Limitations
-- Groq free tier allows ~2 hours of audio per day, and ~1 hour per file (25 MB audio limit)
+- Groq free tier allows ~8 hours of audio per day (~2 hours per hour); the default limits stay under this
 - Accuracy depends on audio quality
 - Not optimized for large-scale or production use
 

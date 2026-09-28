@@ -4,6 +4,8 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import type { NextRequest } from "next/server";
+import { checkDuration, checkUploadSize, getVisitor, LimitError, reserve } from "@/lib/limits";
+import { probeMedia } from "@/lib/media";
 import { splitLongSegments, type Segment } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
@@ -11,7 +13,6 @@ export const maxDuration = 300;
 
 const execFileAsync = promisify(execFile);
 
-const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB) || 500;
 // Groq's free tier rejects audio files larger than 25 MB.
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
@@ -80,6 +81,10 @@ async function transcribe(audioPath: string, language: string, task: string) {
     // The script reports its own failures as {"error": "..."} on stdout.
     try {
       const parsed = JSON.parse(err.stdout ?? "");
+      if (parsed.error && /\b429\b|rate_limit/i.test(parsed.error)) {
+        console.error("Groq rate limit:", parsed.error);
+        throw new UserError("The subtitle service is busy or has hit today's limit. Please try again later.", 503);
+      }
       if (parsed.error) throw new UserError(parsed.error, 502);
     } catch (parseError) {
       if (parseError instanceof UserError) throw parseError;
@@ -93,8 +98,10 @@ async function transcribe(audioPath: string, language: string, task: string) {
 
 export async function POST(req: NextRequest) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "subtitles-"));
+  let release: (() => void) | undefined;
 
   try {
+    const visitor = await getVisitor(req);
     const formData = await req.formData();
     const file = formData.get("video");
     const language = String(formData.get("language") || "ne").toLowerCase();
@@ -107,9 +114,7 @@ export async function POST(req: NextRequest) {
     if (file.type && !file.type.startsWith("video/") && !file.type.startsWith("audio/")) {
       throw new UserError("Please upload a video or audio file.");
     }
-    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      throw new UserError(`File is too large. The limit is ${MAX_UPLOAD_MB} MB.`, 413);
-    }
+    checkUploadSize(file.size);
     if (!LANGUAGE_PATTERN.test(language)) {
       throw new UserError("Invalid language code.");
     }
@@ -119,6 +124,21 @@ export async function POST(req: NextRequest) {
     const audioPath = path.join(workDir, "audio.mp3");
 
     await fs.writeFile(inputPath, Buffer.from(await file.arrayBuffer()));
+
+    let duration: number | null;
+    try {
+      ({ duration } = await probeMedia(inputPath, workDir));
+    } catch {
+      throw new UserError("FFmpeg is not installed or not on your PATH.", 500);
+    }
+    if (duration === null) {
+      throw new UserError("Could not read this file. Is it a valid video or audio file?");
+    }
+    checkDuration(duration);
+
+    // Count this video now; it's given back below if processing fails.
+    release = reserve("video", visitor, duration);
+
     await extractAudio(inputPath, audioPath);
 
     const { size: audioSize } = await fs.stat(audioPath);
@@ -142,7 +162,9 @@ export async function POST(req: NextRequest) {
       segments,
     });
   } catch (error) {
-    if (error instanceof UserError) {
+    // Don't charge people for videos that failed.
+    release?.();
+    if (error instanceof UserError || error instanceof LimitError) {
       return errorResponse(error.message, error.status);
     }
     console.error("Processing error:", error);

@@ -9,6 +9,17 @@ import { TYPING_GUIDE } from "@/lib/nepali";
 
 type Status = "idle" | "uploading" | "processing" | "done" | "error";
 
+type Usage = {
+  limits: { maxVideoSeconds: number; maxUploadMb: number; dailyVideos: number; dailyRenders: number };
+  videosLeft: number;
+  rendersLeft: number;
+};
+
+function formatDuration(seconds: number) {
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 type Result = {
   baseName: string;
   language: string;
@@ -67,12 +78,27 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [nepaliTyping, setNepaliTyping] = useState(true);
   const [shiftBy, setShiftBy] = useState("0.5");
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [fileDuration, setFileDuration] = useState<number | null>(null);
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isBusy = status === "uploading" || status === "processing";
   const isAudioOnly = file?.type.startsWith("audio/") ?? false;
+  // Checked here to save a pointless upload; the server checks again.
+  const isTooLong = usage !== null && fileDuration !== null && fileDuration > usage.limits.maxVideoSeconds + 1;
+  const outOfVideos = usage !== null && usage.videosLeft === 0;
+
+  const refreshUsage = () =>
+    fetch("/api/usage", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u: Usage | null) => u && setUsage(u))
+      .catch(() => {});
+
+  useEffect(() => {
+    refreshUsage();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -107,18 +133,24 @@ export default function Home() {
 
   const selectFile = (next: File | null) => {
     if (isBusy) return;
+    let rejection = "";
     if (next && !next.type.startsWith("video/") && !next.type.startsWith("audio/")) {
-      setError("Please choose a video or audio file.");
-      return;
+      rejection = "Please choose a video or audio file.";
+    } else if (next && usage && next.size > usage.limits.maxUploadMb * 1024 * 1024) {
+      rejection = `This file is ${formatBytes(next.size)}. The limit is ${usage.limits.maxUploadMb} MB. Try exporting it at 1080p.`;
     }
-    setFile(next);
-    setVideoURL(next ? URL.createObjectURL(next) : "");
+    // A rejected file also clears the previous one, so old warnings don't linger.
+    const accepted = rejection ? null : next;
+    setFileDuration(null);
+    setFile(accepted);
+    setVideoURL(accepted ? URL.createObjectURL(accepted) : "");
     setResult(null);
     setSegments([]);
-    setError("");
+    setError(rejection);
     setStatus("idle");
     setCurrentTime(0);
   };
+
 
   const handleGenerate = async () => {
     if (!file) return;
@@ -154,6 +186,8 @@ export default function Home() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
       setStatus("error");
+    } finally {
+      refreshUsage();
     }
   };
 
@@ -267,7 +301,10 @@ export default function Home() {
             ) : (
               <>
                 <p className="font-medium">Drop a video or audio file here</p>
-                <p className="mt-1 text-xs text-white/50">or click to browse · MP4, MOV, MKV, MP3, WAV…</p>
+                <p className="mt-1 text-xs text-white/50">
+                  or click to browse · MP4, MOV, MKV, MP3, WAV…
+                  {usage && ` · up to ${formatDuration(usage.limits.maxVideoSeconds)}, ${usage.limits.maxUploadMb} MB`}
+                </p>
               </>
             )}
           </div>
@@ -322,7 +359,7 @@ export default function Home() {
 
           <button
             onClick={handleGenerate}
-            disabled={!file || isBusy}
+            disabled={!file || isBusy || isTooLong || outOfVideos}
             className="mt-5 w-full rounded-lg bg-white px-4 py-2.5 font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {status === "uploading"
@@ -343,7 +380,24 @@ export default function Home() {
             </div>
           )}
           {status === "processing" && (
-            <p className="mt-2 text-center text-xs text-white/50">This usually takes 10–60 seconds depending on length.</p>
+            <p className="mt-2 text-center text-xs text-white/50">This usually takes 10–30 seconds.</p>
+          )}
+
+          {usage && !isBusy && (
+            <p className={`mt-2 text-center text-xs ${outOfVideos ? "text-amber-300" : "text-white/50"}`}>
+              {outOfVideos
+                ? `You've used all ${usage.limits.dailyVideos} videos for today. Come back tomorrow!`
+                : `${usage.videosLeft} of ${usage.limits.dailyVideos} videos left today · up to ${formatDuration(
+                    usage.limits.maxVideoSeconds
+                  )} and ${usage.limits.maxUploadMb} MB per video`}
+            </p>
+          )}
+
+          {isTooLong && usage && fileDuration !== null && (
+            <p role="alert" className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">
+              This video is {formatDuration(fileDuration)} long. The limit is {formatDuration(usage.limits.maxVideoSeconds)}.
+              Please trim it and choose it again.
+            </p>
           )}
 
           {error && (
@@ -364,6 +418,7 @@ export default function Home() {
                   }}
                   src={videoURL}
                   controls
+                  onLoadedMetadata={(e) => setFileDuration(e.currentTarget.duration)}
                   onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                   className="w-full"
                 />
@@ -374,6 +429,7 @@ export default function Home() {
                   }}
                   src={videoURL}
                   controls
+                  onLoadedMetadata={(e) => setFileDuration(e.currentTarget.duration)}
                   onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                   className="w-full rounded-xl border border-white/10 bg-black"
                 >
@@ -502,7 +558,15 @@ export default function Home() {
         )}
 
         {segments.length > 0 && result && file && !isAudioOnly && (
-          <BurnPanel key={videoURL} file={file} segments={segments} baseName={result.baseName} />
+          <BurnPanel
+            key={videoURL}
+            file={file}
+            segments={segments}
+            baseName={result.baseName}
+            rendersLeft={usage?.rendersLeft ?? null}
+            dailyRenders={usage?.limits.dailyRenders ?? null}
+            onFinished={refreshUsage}
+          />
         )}
       </div>
     </main>
