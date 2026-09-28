@@ -4,9 +4,9 @@ This project is a full-stack web application that automatically generates subtit
 Users can upload a video file, and the system:
 
 - extracts audio using FFmpeg
-- transcribes speech using OpenAI Whisper (local)
-- generates timestamped subtitles in .srt format
-- allows users to preview and download subtitles
+- transcribes speech with Whisper large-v3 (via the Groq API)
+- generates timestamped subtitles (.srt / .vtt)
+- lets users preview, edit, download, or burn the subtitles into the video
 
 ## Features
 - Drag & drop upload of video **or audio** files, with an upload progress bar
@@ -29,16 +29,25 @@ Frontend
   - Tailwind CSS
 
 Backend
-  - Next.js API Routes
-  - Nodes.js
-  - File system handling
+  - Next.js API Routes (Node.js)
+  - File system handling (temp files, deleted after each request)
 
 AI & Processing
-  - FFmpeg (audio extraction)
-  - OpenAI Whisper (local transcripiton via Python) (**Before)
-  - Groq API with Whisper large-v3 (cloud transcription via python)
+  - FFmpeg (audio extraction, burning subtitles into video)
+  - Groq API with Whisper large-v3, called directly from Node.js
+  - See [How transcription evolved](#how-transcription-evolved) for the earlier Python versions
 
 ## Pipeline Architecture
+Current flow:
+```
+Browser upload ─► Next.js API route (Node.js)
+                    ├─ FFmpeg: extract audio (16 kHz mono MP3)
+                    ├─ Groq Whisper API: speech → timestamped segments
+                    └─ split long lines ─► browser editor ─► SRT / VTT / burned-in MP4
+```
+
+Original design:
+
 <img width="507" height="1424" alt="mermaid-diagram" src="https://github.com/user-attachments/assets/c637c936-5a06-4950-b072-60e497d5d118" />
 
 ## Example Output
@@ -50,19 +59,17 @@ AI & Processing
 
 ## Setup Instructions
 1. Clone the repo
-2. Install dependencies
+2. Install dependencies: `npm install` (no Python needed)
 3. Install FFmpeg (a full build with libass, needed for burning subtitles into video; on Windows the gyan.dev "full" build works)
-4. Install Python & the Groq package
-   - `pip install -r python/requirements.txt` (free tier works)
-5. Copy `.env.example` to `.env.local` and fill in your key:
+4. Copy `.env.example` to `.env.local` and fill in your key:
 ```
    GROQ_API_KEY=your_groq_api_key_here
-   # optional
-   PYTHON_BIN=python3      # defaults to "python" on Windows, "python3" elsewhere
-   DAILY_VIDEO_LIMIT=10    # see .env.example for all usage limits
+   # optional, see .env.example for all usage limits
+   DAILY_VIDEO_LIMIT=10
 ```
-   Get a free API key at [console.groq.com](https://console.groq.com)
-6. Run the app
+   Get a free API key at [console.groq.com](https://console.groq.com) (the free tier works).
+   In production, set these in your host's environment variables instead of `.env.local`.
+5. Run the app
    - npm run dev
    - Open: http://localhost:3000
 
@@ -80,18 +87,34 @@ Videos are never stored: they're deleted as soon as they're processed.
 
 Every limit can be changed with an environment variable, see `.env.example`.
 
+## How transcription evolved
+The transcription step was rebuilt twice as the project grew:
+
+| Version | How it worked | Why we moved on |
+|---|---|---|
+| 1. Local Whisper (Python) | OpenAI's open-source Whisper model running on my own machine, called from Node through a Python script | Slow without a GPU, and the smaller models that run on a laptop were not accurate enough for Nepali |
+| 2. Groq API (Python script) | The same Python script, now sending the audio to Groq's hosted Whisper large-v3 with the `groq` package | Much faster and more accurate, but Python was still needed just to make one API call |
+| 3. Groq API (Node.js), **current** | The Next.js API route calls Groq directly with Node's built-in `fetch` | See below |
+
+Why we switched from the Python script to Node.js:
+- **Simpler setup**: `npm install` + FFmpeg + an API key. No Python, `pip`, or `PYTHON_BIN` setting.
+- **Easier deployment**: the server only needs Node.js and FFmpeg, so the production image is smaller and has fewer things to break.
+- **Faster requests**: no separate Python process is started for every video.
+- **Better error handling**: Node sees Groq's HTTP status codes directly (invalid key, rate limit, file too large) and can show users a clear message, instead of parsing text printed by a script.
+- **One language** across the whole backend, with no new dependencies (Groq's API is OpenAI-compatible, so it's a single `fetch` request).
+
 ## Limitations
 - Groq free tier allows ~8 hours of audio per day (~2 hours per hour); the default limits stay under this
 - Accuracy depends on audio quality
-- Not optimized for large-scale or production use
+- Designed to run on a single server: usage counters are kept in memory
 
 ## Future Improvements
 - Improve accuracy using larger and better models
-- Deploy with cloud-based inference
+- Production deployment: Dockerfile (Node.js + FFmpeg) and hosting setup
 
 ## Key Learnings
 - Built an end-to-end AI pipeline (not just UI)
-- Integrated Node.js backend with Python ML script
+- Integrated a Node.js backend with a Python ML script, then simplified it to a direct API call from Node when moving toward production
 - Worked with media processing using FFmpeg
 - Implemented real-world subtitle formatting (.srt)
 - Understood limitations of speech models in low-resource languages

@@ -5,8 +5,9 @@ import path from "path";
 import { promisify } from "util";
 import type { NextRequest } from "next/server";
 import { checkDuration, checkUploadSize, getVisitor, LimitError, reserve } from "@/lib/limits";
+import { GroqError, transcribe } from "@/lib/groq";
 import { probeMedia } from "@/lib/media";
-import { splitLongSegments, type Segment } from "@/lib/subtitles";
+import { splitLongSegments } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,8 +16,6 @@ const execFileAsync = promisify(execFile);
 
 // Groq's free tier rejects audio files larger than 25 MB.
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
-const SCRIPT_PATH = path.join(process.cwd(), "python", "transcribe.py");
 
 const LANGUAGE_PATTERN = /^(auto|[a-z]{2,3})$/;
 // Whisper reports the detected language by name, e.g. "nepali".
@@ -58,42 +57,6 @@ async function extractAudio(inputPath: string, outputPath: string) {
     console.error("FFmpeg error:", err.stderr);
     throw new UserError("Could not read audio from this file. Is it a valid video or audio file?");
   }
-}
-
-async function transcribe(audioPath: string, language: string, task: string) {
-  let stdout = "";
-  try {
-    const result = await execFileAsync(
-      PYTHON_BIN,
-      [SCRIPT_PATH, audioPath, "--language", language, "--task", task],
-      {
-        env: { ...process.env, GROQ_API_KEY: process.env.GROQ_API_KEY?.trim(), PYTHONIOENCODING: "utf-8" },
-        maxBuffer: 64 * 1024 * 1024,
-      }
-    );
-    stdout = result.stdout;
-    if (result.stderr) console.error("Python stderr:", result.stderr);
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    if (err.code === "ENOENT") {
-      throw new UserError(`Python ("${PYTHON_BIN}") was not found. Install Python or set PYTHON_BIN.`, 500);
-    }
-    // The script reports its own failures as {"error": "..."} on stdout.
-    try {
-      const parsed = JSON.parse(err.stdout ?? "");
-      if (parsed.error && /\b429\b|rate_limit/i.test(parsed.error)) {
-        console.error("Groq rate limit:", parsed.error);
-        throw new UserError("The subtitle service is busy or has hit today's limit. Please try again later.", 503);
-      }
-      if (parsed.error) throw new UserError(parsed.error, 502);
-    } catch (parseError) {
-      if (parseError instanceof UserError) throw parseError;
-    }
-    console.error("Python error:", err.stderr);
-    throw new UserError("Transcription failed. Check the server logs for details.", 500);
-  }
-
-  return JSON.parse(stdout) as { text: string; language?: string; segments: Segment[] };
 }
 
 export async function POST(req: NextRequest) {
@@ -146,7 +109,7 @@ export async function POST(req: NextRequest) {
       throw new UserError("The audio is too long (over about 1 hour). Please trim the video and try again.", 413);
     }
 
-    const result = await transcribe(audioPath, language, task);
+    const result = await transcribe(audioPath, { language, task });
     const segments = splitLongSegments(result.segments ?? [], maxChars);
 
     if (segments.length === 0) {
@@ -164,7 +127,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     // Don't charge people for videos that failed.
     release?.();
-    if (error instanceof UserError || error instanceof LimitError) {
+    if (error instanceof UserError || error instanceof LimitError || error instanceof GroqError) {
       return errorResponse(error.message, error.status);
     }
     console.error("Processing error:", error);
