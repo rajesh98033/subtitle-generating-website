@@ -7,6 +7,8 @@ import { Readable } from "stream";
 import { promisify } from "util";
 import type { NextRequest } from "next/server";
 import { BURN_SIZES, BURN_STYLES, toASS, type BurnSize, type BurnStyle } from "@/lib/ass";
+import { checkDuration, checkUploadSize, getVisitor, LimitError, reserve } from "@/lib/limits";
+import { probeMedia } from "@/lib/media";
 import type { Segment } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
@@ -14,32 +16,7 @@ export const maxDuration = 800;
 
 const execFileAsync = promisify(execFile);
 
-const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB) || 500;
 const FONTS_DIR = path.join(process.cwd(), "assets", "fonts");
-
-/**
- * Reads the video's on-screen size. Phones often store portrait video as
- * landscape plus a "rotate 90°" flag, so swap width/height in that case;
- * FFmpeg applies the rotation when it renders.
- */
-async function probeDisplaySize(inputName: string, cwd: string) {
-  let info = "";
-  try {
-    await execFileAsync("ffmpeg", ["-hide_banner", "-i", inputName], { cwd });
-  } catch (error) {
-    // "ffmpeg -i" with no output always exits with an error; the info is in stderr.
-    const err = error as NodeJS.ErrnoException & { stderr?: string };
-    if (err.code === "ENOENT") throw err;
-    info = err.stderr ?? "";
-  }
-  const size = info.match(/Video:.*?\b(\d{2,5})x(\d{2,5})\b/);
-  if (!size) return null;
-  let width = Number(size[1]);
-  let height = Number(size[2]);
-  const rotation = info.match(/rotation of (-?\d+(?:\.\d+)?) degrees/) ?? info.match(/rotate\s*:\s*(-?\d+)/);
-  if (rotation && Math.abs(Number(rotation[1])) % 180 === 90) [width, height] = [height, width];
-  return { width, height };
-}
 
 function parseSegments(value: FormDataEntryValue | null): Segment[] | null {
   if (typeof value !== "string") return null;
@@ -61,8 +38,10 @@ function errorResponse(message: string, status: number) {
 export async function POST(req: NextRequest) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "burn-"));
   let streaming = false;
+  let release: (() => void) | undefined;
 
   try {
+    const visitor = await getVisitor(req);
     const formData = await req.formData();
     const file = formData.get("video");
     const segments = parseSegments(formData.get("segments"));
@@ -77,9 +56,7 @@ export async function POST(req: NextRequest) {
     if (file.type && !file.type.startsWith("video/")) {
       return errorResponse("Subtitles can only be burned into a video file.", 400);
     }
-    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      return errorResponse(`File is too large. The limit is ${MAX_UPLOAD_MB} MB.`, 413);
-    }
+    checkUploadSize(file.size);
     if (!segments || segments.length === 0) {
       return errorResponse("There are no subtitles to burn in.", 400);
     }
@@ -89,15 +66,20 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(path.join(workDir, inputName), Buffer.from(await file.arrayBuffer()));
     await fs.cp(FONTS_DIR, path.join(workDir, "fonts"), { recursive: true });
 
-    let display;
+    let media;
     try {
-      display = await probeDisplaySize(inputName, workDir);
+      media = await probeMedia(inputName, workDir);
     } catch {
       return errorResponse("FFmpeg is not installed or not on your PATH.", 500);
     }
-    if (!display) {
+    const { display, duration } = media;
+    if (!display || duration === null) {
       return errorResponse("Could not read this video. Is it a valid video file?", 400);
     }
+    checkDuration(duration);
+
+    // Count this render now; it's given back in `finally` if it fails.
+    release = reserve("render", visitor);
 
     await fs.writeFile(path.join(workDir, "subs.ass"), toASS(segments, { ...display, style, size }), "utf-8");
 
@@ -156,9 +138,14 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof LimitError) return errorResponse(error.message, error.status);
     console.error("Burn error:", error);
     return errorResponse("Something went wrong while rendering the video.", 500);
   } finally {
-    if (!streaming) await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    if (!streaming) {
+      // Don't charge people for renders that failed.
+      release?.();
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }

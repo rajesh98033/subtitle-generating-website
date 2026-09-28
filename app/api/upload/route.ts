@@ -4,18 +4,18 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import type { NextRequest } from "next/server";
-import { splitLongSegments, type Segment } from "@/lib/subtitles";
+import { checkDuration, checkUploadSize, getVisitor, LimitError, reserve } from "@/lib/limits";
+import { GroqError, transcribe } from "@/lib/groq";
+import { probeMedia } from "@/lib/media";
+import { splitLongSegments } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const execFileAsync = promisify(execFile);
 
-const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB) || 500;
 // Groq's free tier rejects audio files larger than 25 MB.
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
-const SCRIPT_PATH = path.join(process.cwd(), "python", "transcribe.py");
 
 const LANGUAGE_PATTERN = /^(auto|[a-z]{2,3})$/;
 // Whisper reports the detected language by name, e.g. "nepali".
@@ -59,42 +59,12 @@ async function extractAudio(inputPath: string, outputPath: string) {
   }
 }
 
-async function transcribe(audioPath: string, language: string, task: string) {
-  let stdout = "";
-  try {
-    const result = await execFileAsync(
-      PYTHON_BIN,
-      [SCRIPT_PATH, audioPath, "--language", language, "--task", task],
-      {
-        env: { ...process.env, GROQ_API_KEY: process.env.GROQ_API_KEY?.trim(), PYTHONIOENCODING: "utf-8" },
-        maxBuffer: 64 * 1024 * 1024,
-      }
-    );
-    stdout = result.stdout;
-    if (result.stderr) console.error("Python stderr:", result.stderr);
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    if (err.code === "ENOENT") {
-      throw new UserError(`Python ("${PYTHON_BIN}") was not found. Install Python or set PYTHON_BIN.`, 500);
-    }
-    // The script reports its own failures as {"error": "..."} on stdout.
-    try {
-      const parsed = JSON.parse(err.stdout ?? "");
-      if (parsed.error) throw new UserError(parsed.error, 502);
-    } catch (parseError) {
-      if (parseError instanceof UserError) throw parseError;
-    }
-    console.error("Python error:", err.stderr);
-    throw new UserError("Transcription failed. Check the server logs for details.", 500);
-  }
-
-  return JSON.parse(stdout) as { text: string; language?: string; segments: Segment[] };
-}
-
 export async function POST(req: NextRequest) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "subtitles-"));
+  let release: (() => void) | undefined;
 
   try {
+    const visitor = await getVisitor(req);
     const formData = await req.formData();
     const file = formData.get("video");
     const language = String(formData.get("language") || "ne").toLowerCase();
@@ -107,9 +77,7 @@ export async function POST(req: NextRequest) {
     if (file.type && !file.type.startsWith("video/") && !file.type.startsWith("audio/")) {
       throw new UserError("Please upload a video or audio file.");
     }
-    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      throw new UserError(`File is too large. The limit is ${MAX_UPLOAD_MB} MB.`, 413);
-    }
+    checkUploadSize(file.size);
     if (!LANGUAGE_PATTERN.test(language)) {
       throw new UserError("Invalid language code.");
     }
@@ -119,6 +87,21 @@ export async function POST(req: NextRequest) {
     const audioPath = path.join(workDir, "audio.mp3");
 
     await fs.writeFile(inputPath, Buffer.from(await file.arrayBuffer()));
+
+    let duration: number | null;
+    try {
+      ({ duration } = await probeMedia(inputPath, workDir));
+    } catch {
+      throw new UserError("FFmpeg is not installed or not on your PATH.", 500);
+    }
+    if (duration === null) {
+      throw new UserError("Could not read this file. Is it a valid video or audio file?");
+    }
+    checkDuration(duration);
+
+    // Count this video now; it's given back below if processing fails.
+    release = reserve("video", visitor, duration);
+
     await extractAudio(inputPath, audioPath);
 
     const { size: audioSize } = await fs.stat(audioPath);
@@ -126,7 +109,7 @@ export async function POST(req: NextRequest) {
       throw new UserError("The audio is too long (over about 1 hour). Please trim the video and try again.", 413);
     }
 
-    const result = await transcribe(audioPath, language, task);
+    const result = await transcribe(audioPath, { language, task });
     const segments = splitLongSegments(result.segments ?? [], maxChars);
 
     if (segments.length === 0) {
@@ -142,7 +125,9 @@ export async function POST(req: NextRequest) {
       segments,
     });
   } catch (error) {
-    if (error instanceof UserError) {
+    // Don't charge people for videos that failed.
+    release?.();
+    if (error instanceof UserError || error instanceof LimitError || error instanceof GroqError) {
       return errorResponse(error.message, error.status);
     }
     console.error("Processing error:", error);

@@ -8,6 +8,11 @@ type Props = {
   file: File;
   segments: Segment[];
   baseName: string;
+  /** Renders this visitor has left today, or null if not known yet. */
+  rendersLeft: number | null;
+  dailyRenders: number | null;
+  /** Called after every attempt, so the page can refresh the counters. */
+  onFinished: () => void;
 };
 
 type Status = "idle" | "uploading" | "rendering" | "done" | "error";
@@ -24,7 +29,7 @@ const STYLES = [
   { value: "yellow", label: "Yellow text", sample: "text-yellow-300" },
 ];
 
-export default function BurnPanel({ file, segments, baseName }: Props) {
+export default function BurnPanel({ file, segments, baseName, rendersLeft, dailyRenders, onFinished }: Props) {
   const [size, setSize] = useState("medium");
   const [style, setStyle] = useState("box");
   const [status, setStatus] = useState<Status>("idle");
@@ -36,6 +41,7 @@ export default function BurnPanel({ file, segments, baseName }: Props) {
   // Snapshot of the subtitles, to tell whether the rendered video is outdated.
   const subtitles = useMemo(() => JSON.stringify(segments), [segments]);
   const isBusy = status === "uploading" || status === "rendering";
+  const outOfRenders = rendersLeft === 0;
   const isStale = video !== null && video.subtitles !== subtitles;
 
   useEffect(() => {
@@ -78,6 +84,8 @@ export default function BurnPanel({ file, segments, baseName }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
       setStatus("error");
+    } finally {
+      onFinished();
     }
   };
 
@@ -138,7 +146,7 @@ export default function BurnPanel({ file, segments, baseName }: Props) {
 
           <button
             onClick={handleBurn}
-            disabled={isBusy}
+            disabled={isBusy || outOfRenders}
             className="w-full rounded-lg bg-white px-4 py-2.5 font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {status === "uploading"
@@ -149,6 +157,13 @@ export default function BurnPanel({ file, segments, baseName }: Props) {
                   ? "Render again"
                   : "Create video with subtitles"}
           </button>
+          {rendersLeft !== null && dailyRenders !== null && !isBusy && (
+            <p className={`-mt-2 text-center text-xs ${outOfRenders ? "text-amber-300" : "text-white/50"}`}>
+              {outOfRenders
+                ? `You've used all ${dailyRenders} video renders for today. Come back tomorrow!`
+                : `${rendersLeft} of ${dailyRenders} renders left today`}
+            </p>
+          )}
         </div>
       </div>
 
